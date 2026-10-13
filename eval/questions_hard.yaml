@@ -1,0 +1,194 @@
+# Held-out HARD test set. Written after prompt tuning was finished and never used to tune prompts.
+# Targets known text-to-SQL failure modes: business jargon, typos, medians, shares of total,
+# conditional aggregation, deduplication traps and questions that sound answerable but are not.
+
+- id: h01
+  category: jargon
+  question: What was our GMV on Black Friday 2017 (24 November)?
+  gold_sql: |
+    SELECT ROUND(SUM(oi.price), 2) AS gmv
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND date(o.order_purchase_timestamp) = '2017-11-24'
+
+- id: h02
+  category: filter_on_aggregate
+  question: List the sellers who made more than R$100,000 in sales.
+  gold_sql: |
+    SELECT oi.seller_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.seller_id
+    HAVING SUM(oi.price) > 100000
+
+- id: h03
+  category: filter_on_aggregate
+  question: What is the average delivery time in days for customers in the northern states AM, PA, RR, AP, AC, RO and TO?
+  gold_sql: |
+    SELECT ROUND(AVG(julianday(o.order_delivered_customer_date)
+                     - julianday(o.order_purchase_timestamp)), 1) AS avg_delivery_days
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND c.customer_state IN ('AM', 'PA', 'RR', 'AP', 'AC', 'RO', 'TO')
+
+- id: h04
+  category: conditional_aggregation
+  question: Which product categories had more revenue in 2018 than in 2017?
+  gold_sql: |
+    SELECT p.product_category
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.product_category
+    HAVING SUM(CASE WHEN strftime('%Y', o.order_purchase_timestamp) = '2018' THEN oi.price ELSE 0 END)
+         > SUM(CASE WHEN strftime('%Y', o.order_purchase_timestamp) = '2017' THEN oi.price ELSE 0 END)
+
+- id: h05
+  category: multi_step
+  question: How many customers have bought from more than one product category?
+  gold_sql: |
+    SELECT COUNT(*) AS customers
+    FROM (
+        SELECT c.customer_unique_id
+        FROM customers c
+        JOIN orders o ON o.customer_id = c.customer_id
+        JOIN order_items oi ON oi.order_id = o.order_id
+        JOIN products p ON p.product_id = oi.product_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY c.customer_unique_id
+        HAVING COUNT(DISTINCT p.product_category) > 1
+    ) t
+
+- id: h06
+  category: share_of_total
+  question: What share of total revenue comes from the top 10 sellers?
+  gold_sql: |
+    WITH s AS (
+        SELECT oi.seller_id, SUM(oi.price) AS revenue
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY oi.seller_id
+    )
+    SELECT ROUND(100.0 * (SELECT SUM(revenue) FROM (SELECT revenue FROM s ORDER BY revenue DESC LIMIT 10))
+                 / (SELECT SUM(revenue) FROM s), 1) AS top10_share_pct
+
+- id: h07
+  category: filter_on_aggregate
+  question: What is the average review score of orders that took more than 30 days to deliver?
+  gold_sql: |
+    SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+    FROM reviews r
+    JOIN orders o ON o.order_id = r.order_id
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND julianday(o.order_delivered_customer_date) - julianday(o.order_purchase_timestamp) > 30
+
+- id: h08
+  category: ranking
+  question: Which customer (customer_unique_id) generated the most revenue?
+  gold_sql: |
+    SELECT c.customer_unique_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_unique_id
+    ORDER BY SUM(oi.price) DESC
+    LIMIT 1
+
+- id: h09
+  category: ranking
+  question: In which state do customers pay the highest average freight per item?
+  gold_sql: |
+    SELECT c.customer_state
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_state
+    ORDER BY AVG(oi.freight_value) DESC
+    LIMIT 1
+
+- id: h10
+  category: multi_step
+  question: What percentage of orders were paid with more than one payment method?
+  gold_sql: |
+    WITH pm AS (
+        SELECT p.order_id, COUNT(DISTINCT p.payment_type) AS methods
+        FROM payments p
+        JOIN orders o ON o.order_id = p.order_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY p.order_id
+    )
+    SELECT ROUND(100.0 * SUM(CASE WHEN methods > 1 THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_multi_method
+    FROM pm
+
+- id: h11
+  category: date_logic
+  question: How many delivered orders arrived in the same calendar month they were purchased?
+  gold_sql: |
+    SELECT COUNT(*) AS orders
+    FROM orders o
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND strftime('%Y-%m', o.order_delivered_customer_date) = strftime('%Y-%m', o.order_purchase_timestamp)
+
+- id: h12
+  category: dedup_trap
+  question: Which sellers have an average review score below 3 with at least 50 reviews?
+  gold_sql: |
+    WITH seller_orders AS (
+        SELECT DISTINCT oi.order_id, oi.seller_id
+        FROM order_items oi
+    )
+    SELECT so.seller_id
+    FROM reviews r
+    JOIN orders o ON o.order_id = r.order_id
+    JOIN seller_orders so ON so.order_id = r.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY so.seller_id
+    HAVING COUNT(*) >= 50 AND AVG(r.review_score) < 3
+
+- id: h13
+  category: statistics
+  question: What is the median order value?
+  gold_sql: |
+    WITH order_totals AS (
+        SELECT oi.order_id, SUM(oi.price) AS order_value
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY oi.order_id
+    ),
+    ranked AS (
+        SELECT order_value,
+               ROW_NUMBER() OVER (ORDER BY order_value) AS rn,
+               COUNT(*) OVER () AS n
+        FROM order_totals
+    )
+    SELECT ROUND(AVG(order_value), 2) AS median_order_value
+    FROM ranked
+    WHERE rn IN ((n + 1) / 2, (n + 2) / 2)
+
+- id: h14
+  category: typos
+  question: whats the totl revnue from sao paulo city in 2018
+  gold_sql: |
+    SELECT ROUND(SUM(oi.price), 2) AS revenue
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND c.customer_city = 'sao paulo'
+      AND strftime('%Y', o.order_purchase_timestamp) = '2018'
+
+- id: h15
+  category: unanswerable
+  question: Which products are currently out of stock?
+  gold_sql: CANNOT_ANSWER

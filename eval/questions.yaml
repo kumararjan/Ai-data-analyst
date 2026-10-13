@@ -1,0 +1,370 @@
+# Evaluation set for the AI Data Analyst (text-to-SQL).
+# Each item: id, category, question, gold_sql (or CANNOT_ANSWER).
+# Gold SQL returns only the columns that define a correct answer.
+# Extra columns in the model's answer are allowed; missing or wrong values are not.
+
+- id: q01
+  category: simple
+  question: How many orders are in the database in total, including every order status?
+  gold_sql: |
+    SELECT COUNT(DISTINCT order_id) AS total_orders
+    FROM orders
+
+- id: q02
+  category: simple
+  question: How many sellers are there?
+  gold_sql: |
+    SELECT COUNT(DISTINCT seller_id) AS sellers
+    FROM sellers
+
+- id: q03
+  category: simple
+  question: How many orders are there in each order status (all statuses)?
+  gold_sql: |
+    SELECT order_status, COUNT(DISTINCT order_id) AS orders
+    FROM orders
+    GROUP BY order_status
+
+- id: q04
+  category: simple
+  question: What is the average review score for delivered orders?
+  gold_sql: |
+    SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+    FROM reviews r
+    JOIN orders o ON o.order_id = r.order_id
+    WHERE o.order_status = 'delivered'
+
+- id: q05
+  category: simple
+  question: Which 5 states have the most sellers?
+  gold_sql: |
+    SELECT seller_state
+    FROM sellers
+    GROUP BY seller_state
+    ORDER BY COUNT(*) DESC
+    LIMIT 5
+
+- id: q06
+  category: simple
+  question: Which 5 product categories have the most products in the catalog?
+  gold_sql: |
+    SELECT product_category
+    FROM products
+    GROUP BY product_category
+    ORDER BY COUNT(*) DESC
+    LIMIT 5
+
+- id: q07
+  category: simple
+  question: What is the average number of installments for credit card payments?
+  gold_sql: |
+    SELECT ROUND(AVG(payment_installments), 2) AS avg_installments
+    FROM payments
+    WHERE payment_type = 'credit_card'
+
+- id: q08
+  category: simple
+  question: How many orders were canceled?
+  gold_sql: |
+    SELECT COUNT(DISTINCT order_id) AS canceled_orders
+    FROM orders
+    WHERE order_status = 'canceled'
+
+- id: q09
+  category: aggregation_join
+  question: What was the total revenue in 2017?
+  gold_sql: |
+    SELECT ROUND(SUM(oi.price), 2) AS revenue
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) = '2017'
+
+- id: q10
+  category: aggregation_join
+  question: What was the average order value in 2018?
+  gold_sql: |
+    SELECT ROUND(SUM(oi.price) * 1.0 / COUNT(DISTINCT o.order_id), 2) AS avg_order_value
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) = '2018'
+
+- id: q11
+  category: aggregation_join
+  question: How many units were sold in the health_beauty category?
+  gold_sql: |
+    SELECT COUNT(*) AS units_sold
+    FROM order_items oi
+    JOIN products p ON p.product_id = oi.product_id
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE p.product_category = 'health_beauty'
+      AND o.order_status NOT IN ('canceled', 'unavailable')
+
+- id: q12
+  category: aggregation_join
+  question: What is the total freight cost for orders from customers in the state of SP?
+  gold_sql: |
+    SELECT ROUND(SUM(oi.freight_value), 2) AS total_freight
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE c.customer_state = 'SP'
+      AND o.order_status NOT IN ('canceled', 'unavailable')
+
+- id: q13
+  category: aggregation_join
+  question: What is the total payment value for each payment type?
+  gold_sql: |
+    SELECT p.payment_type, ROUND(SUM(p.payment_value), 2) AS total_payment_value
+    FROM payments p
+    JOIN orders o ON o.order_id = p.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.payment_type
+
+- id: q14
+  category: aggregation_join
+  question: What is the average item price in the computers_accessories category?
+  gold_sql: |
+    SELECT ROUND(AVG(oi.price), 2) AS avg_price
+    FROM order_items oi
+    JOIN products p ON p.product_id = oi.product_id
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE p.product_category = 'computers_accessories'
+      AND o.order_status NOT IN ('canceled', 'unavailable')
+
+- id: q15
+  category: time_series
+  question: How many orders were placed each year?
+  gold_sql: |
+    SELECT strftime('%Y', o.order_purchase_timestamp) AS year,
+           COUNT(DISTINCT o.order_id) AS orders
+    FROM orders o
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY year
+    ORDER BY year
+
+- id: q16
+  category: time_series
+  question: Which month of 2017 had the highest revenue?
+  gold_sql: |
+    SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) = '2017'
+    GROUP BY month
+    ORDER BY SUM(oi.price) DESC
+    LIMIT 1
+
+- id: q17
+  category: time_series
+  question: What was the monthly average delivery time in days for delivered orders from January to June 2018?
+  gold_sql: |
+    SELECT strftime('%Y-%m', o.order_purchase_timestamp) AS month,
+           ROUND(AVG(julianday(o.order_delivered_customer_date)
+                     - julianday(o.order_purchase_timestamp)), 1) AS avg_delivery_days
+    FROM orders o
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+      AND strftime('%Y-%m', o.order_purchase_timestamp) BETWEEN '2018-01' AND '2018-06'
+    GROUP BY month
+    ORDER BY month
+
+- id: q18
+  category: time_series
+  question: How many orders were placed in each hour of the day?
+  gold_sql: |
+    SELECT CAST(strftime('%H', o.order_purchase_timestamp) AS INTEGER) AS hour,
+           COUNT(DISTINCT o.order_id) AS orders
+    FROM orders o
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY hour
+    ORDER BY hour
+
+- id: q19
+  category: ranking
+  question: Who are the top 5 sellers by number of orders?
+  gold_sql: |
+    SELECT oi.seller_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.seller_id
+    ORDER BY COUNT(DISTINCT oi.order_id) DESC
+    LIMIT 5
+
+- id: q20
+  category: ranking
+  question: What are the top 5 product categories by units sold in 2018?
+  gold_sql: |
+    SELECT p.product_category
+    FROM order_items oi
+    JOIN products p ON p.product_id = oi.product_id
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) = '2018'
+    GROUP BY p.product_category
+    ORDER BY COUNT(*) DESC
+    LIMIT 5
+
+- id: q21
+  category: ranking
+  question: Which 5 customer states have the highest average order value?
+  gold_sql: |
+    SELECT c.customer_state
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_state
+    ORDER BY SUM(oi.price) * 1.0 / COUNT(DISTINCT o.order_id) DESC
+    LIMIT 5
+
+- id: q22
+  category: ranking
+  question: Which 5 cities generated the most revenue?
+  gold_sql: |
+    SELECT c.customer_city
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_city
+    ORDER BY SUM(oi.price) DESC
+    LIMIT 5
+
+- id: q23
+  category: ranking
+  question: Which product category has the highest average review score, among categories with at least 30 reviews?
+  gold_sql: |
+    WITH order_category AS (
+        SELECT DISTINCT oi.order_id, p.product_category
+        FROM order_items oi
+        JOIN products p ON p.product_id = oi.product_id
+    )
+    SELECT oc.product_category
+    FROM reviews r
+    JOIN orders o ON o.order_id = r.order_id
+    JOIN order_category oc ON oc.order_id = r.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oc.product_category
+    HAVING COUNT(*) >= 30
+    ORDER BY AVG(r.review_score) DESC
+    LIMIT 1
+
+- id: q24
+  category: ranking
+  question: Which 5 customer states have the fastest average delivery time?
+  gold_sql: |
+    SELECT c.customer_state
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+    GROUP BY c.customer_state
+    ORDER BY AVG(julianday(o.order_delivered_customer_date)
+                 - julianday(o.order_purchase_timestamp)) ASC
+    LIMIT 5
+
+- id: q25
+  category: ranking
+  question: Which payment type has the highest average payment value?
+  gold_sql: |
+    SELECT p.payment_type
+    FROM payments p
+    JOIN orders o ON o.order_id = p.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.payment_type
+    ORDER BY AVG(p.payment_value) DESC
+    LIMIT 1
+
+- id: q26
+  category: ranking
+  question: What are the top 3 product categories by revenue for customers in the state of RJ?
+  gold_sql: |
+    SELECT p.product_category
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    JOIN customers c ON c.customer_id = o.customer_id
+    JOIN products p ON p.product_id = oi.product_id
+    WHERE c.customer_state = 'RJ'
+      AND o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.product_category
+    ORDER BY SUM(oi.price) DESC
+    LIMIT 3
+
+- id: q27
+  category: complex
+  question: How many unique customers have placed more than one order?
+  gold_sql: |
+    SELECT COUNT(*) AS repeat_customers
+    FROM (
+        SELECT c.customer_unique_id
+        FROM customers c
+        JOIN orders o ON o.customer_id = c.customer_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY c.customer_unique_id
+        HAVING COUNT(DISTINCT o.order_id) > 1
+    ) t
+
+- id: q28
+  category: complex
+  question: What percentage of delivered orders were delivered later than the estimated delivery date?
+  gold_sql: |
+    SELECT ROUND(100.0 * SUM(CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+                                  THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_late
+    FROM orders o
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+
+- id: q29
+  category: complex
+  question: How many orders contain more than one item?
+  gold_sql: |
+    SELECT COUNT(*) AS multi_item_orders
+    FROM (
+        SELECT oi.order_id
+        FROM order_items oi
+        JOIN orders o ON o.order_id = oi.order_id
+        WHERE o.order_status NOT IN ('canceled', 'unavailable')
+        GROUP BY oi.order_id
+        HAVING COUNT(*) > 1
+    ) t
+
+- id: q30
+  category: complex
+  question: What is the average review score for late deliveries compared with on-time deliveries?
+  gold_sql: |
+    SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+    FROM reviews r
+    JOIN orders o ON o.order_id = r.order_id
+    WHERE o.order_status = 'delivered'
+      AND o.order_delivered_customer_date IS NOT NULL
+    GROUP BY CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+                  THEN 'late' ELSE 'on_time' END
+
+- id: q31
+  category: unanswerable
+  question: What is our profit margin by product category?
+  gold_sql: CANNOT_ANSWER
+
+- id: q32
+  category: unanswerable
+  question: How much did we spend on marketing last year?
+  gold_sql: CANNOT_ANSWER
+
+- id: q33
+  category: unanswerable
+  question: What is the age distribution of our customers?
+  gold_sql: CANNOT_ANSWER
+
+- id: q34
+  category: unanswerable
+  question: How do our prices compare with Amazon's prices?
+  gold_sql: CANNOT_ANSWER
+
+- id: q35
+  category: unanswerable
+  question: What is the gender split of our customers?
+  gold_sql: CANNOT_ANSWER
