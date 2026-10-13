@@ -1,0 +1,29 @@
+id,category,question,correct,status,attempts,self_corrected,latency_s,error,attempt_errors,generated_sql,gold_sql
+q29,complex,How many orders contain more than one item?,True,ok,1,False,1.39,,,"SELECT COUNT(*) AS orders_with_multiple_items
+FROM (
+    SELECT oi.order_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.order_id
+    HAVING COUNT(*) > 1
+) sub","SELECT COUNT(*) AS multi_item_orders
+FROM (
+    SELECT oi.order_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.order_id
+    HAVING COUNT(*) > 1
+) t"
+q30,complex,What is the average review score for late deliveries compared with on-time deliveries?,False,failed,0,False,0.14,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+FROM reviews r
+JOIN orders o ON o.order_id = r.order_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+GROUP BY CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+              THEN 'late' ELSE 'on_time' END"
+q31,unanswerable,What is our profit margin by product category?,False,failed,0,False,0.15,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q32,unanswerable,How much did we spend on marketing last year?,False,failed,0,False,0.18,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q34,unanswerable,How do our prices compare with Amazon's prices?,False,failed,0,False,0.14,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q35,unanswerable,What is the gender split of our customers?,False,failed,0,False,0.13,"expected refusal, got status=failed",,,CANNOT_ANSWER

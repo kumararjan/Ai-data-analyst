@@ -1,0 +1,61 @@
+id,category,question,correct,status,attempts,self_corrected,latency_s,error,attempt_errors,generated_sql,gold_sql
+q25,ranking,Which payment type has the highest average payment value?,True,ok,1,False,3.6,,,"SELECT p.payment_type,
+       ROUND(AVG(p.payment_value), 2) AS avg_payment_value,
+       COUNT(*) AS payment_rows
+FROM payments p
+JOIN orders o ON o.order_id = p.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY p.payment_type
+ORDER BY avg_payment_value DESC
+LIMIT 1","SELECT p.payment_type
+FROM payments p
+JOIN orders o ON o.order_id = p.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY p.payment_type
+ORDER BY AVG(p.payment_value) DESC
+LIMIT 1"
+q26,ranking,What are the top 3 product categories by revenue for customers in the state of RJ?,False,failed,0,False,0.46,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT p.product_category
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+JOIN products p ON p.product_id = oi.product_id
+WHERE c.customer_state = 'RJ'
+  AND o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY p.product_category
+ORDER BY SUM(oi.price) DESC
+LIMIT 3"
+q27,complex,How many unique customers have placed more than one order?,False,failed,0,False,0.49,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT COUNT(*) AS repeat_customers
+FROM (
+    SELECT c.customer_unique_id
+    FROM customers c
+    JOIN orders o ON o.customer_id = c.customer_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_unique_id
+    HAVING COUNT(DISTINCT o.order_id) > 1
+) t"
+q28,complex,What percentage of delivered orders were delivered later than the estimated delivery date?,False,failed,0,False,0.47,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT ROUND(100.0 * SUM(CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+                              THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_late
+FROM orders o
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL"
+q29,complex,How many orders contain more than one item?,False,failed,0,False,0.56,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT COUNT(*) AS multi_item_orders
+FROM (
+    SELECT oi.order_id
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.order_id
+    HAVING COUNT(*) > 1
+) t"
+q30,complex,What is the average review score for late deliveries compared with on-time deliveries?,False,failed,0,False,0.46,LLM service error: The free AI quota is used up for now (groq daily quota reached). Please try again later.,,,"SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+FROM reviews r
+JOIN orders o ON o.order_id = r.order_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+GROUP BY CASE WHEN o.order_delivered_customer_date > o.order_estimated_delivery_date
+              THEN 'late' ELSE 'on_time' END"
+q31,unanswerable,What is our profit margin by product category?,False,failed,0,False,1.55,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q32,unanswerable,How much did we spend on marketing last year?,False,failed,0,False,0.47,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q33,unanswerable,What is the age distribution of our customers?,False,failed,0,False,0.54,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q34,unanswerable,How do our prices compare with Amazon's prices?,False,failed,0,False,0.22,"expected refusal, got status=failed",,,CANNOT_ANSWER
+q35,unanswerable,What is the gender split of our customers?,False,failed,0,False,0.6,"expected refusal, got status=failed",,,CANNOT_ANSWER

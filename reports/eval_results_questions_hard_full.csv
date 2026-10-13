@@ -1,0 +1,291 @@
+id,category,question,correct,status,attempts,self_corrected,latency_s,error,generated_sql,gold_sql
+h01,jargon,What was our GMV on Black Friday 2017 (24 November)?,True,ok,1,False,2.19,,"SELECT ROUND(SUM(oi.price), 2) AS gmv
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+  AND DATE(o.order_purchase_timestamp) = '2017-11-24'","SELECT ROUND(SUM(oi.price), 2) AS gmv
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+  AND date(o.order_purchase_timestamp) = '2017-11-24'"
+h02,filter_on_aggregate,"List the sellers who made more than R$100,000 in sales.",True,ok,1,False,4.52,,"SELECT s.seller_id,
+       s.seller_city,
+       s.seller_state,
+       ROUND(SUM(oi.price), 2) AS total_sales
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN sellers s ON s.seller_id = oi.seller_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY s.seller_id, s.seller_city, s.seller_state
+HAVING SUM(oi.price) > 100000
+ORDER BY total_sales DESC","SELECT oi.seller_id
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY oi.seller_id
+HAVING SUM(oi.price) > 100000"
+h03,filter_on_aggregate,"What is the average delivery time in days for customers in the northern states AM, PA, RR, AP, AC, RO and TO?",False,ok,1,False,1.04,result differs from gold,"SELECT c.customer_state,
+       ROUND(AVG(julianday(o.order_delivered_customer_date) -
+                 julianday(o.order_purchase_timestamp)), 1) AS avg_delivery_days,
+       COUNT(*) AS delivered_orders
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND c.customer_state IN ('AM', 'PA', 'RR', 'AP', 'AC', 'RO', 'TO')
+GROUP BY c.customer_state
+HAVING COUNT(*) >= 30
+ORDER BY avg_delivery_days ASC","SELECT ROUND(AVG(julianday(o.order_delivered_customer_date)
+                 - julianday(o.order_purchase_timestamp)), 1) AS avg_delivery_days
+FROM orders o
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND c.customer_state IN ('AM', 'PA', 'RR', 'AP', 'AC', 'RO', 'TO')"
+h04,conditional_aggregation,Which product categories had more revenue in 2018 than in 2017?,True,ok,1,False,5.52,,"WITH yearly_rev AS (
+    SELECT p.product_category,
+           strftime('%Y', o.order_purchase_timestamp) AS yr,
+           ROUND(SUM(oi.price), 2) AS revenue
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) IN ('2017', '2018')
+    GROUP BY p.product_category, yr
+)
+SELECT r2018.product_category,
+       r2017.revenue AS revenue_2017,
+       r2018.revenue AS revenue_2018,
+       ROUND(r2018.revenue - r2017.revenue, 2) AS revenue_change
+FROM yearly_rev r2017
+JOIN yearly_rev r2018
+  ON r2017.product_category = r2018.product_category
+ AND r2017.yr = '2017'
+ AND r2018.yr = '2018'
+WHERE r2018.revenue > r2017.revenue
+ORDER BY revenue_change DESC","SELECT p.product_category
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN products p ON p.product_id = oi.product_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY p.product_category
+HAVING SUM(CASE WHEN strftime('%Y', o.order_purchase_timestamp) = '2018' THEN oi.price ELSE 0 END)
+     > SUM(CASE WHEN strftime('%Y', o.order_purchase_timestamp) = '2017' THEN oi.price ELSE 0 END)"
+h05,multi_step,How many customers have bought from more than one product category?,False,ok,3,False,32.44,result differs from gold,"SELECT COUNT(*) AS customers_multiple_categories
+FROM (
+    SELECT c.customer_unique_id,
+           COUNT(DISTINCT p.product_category) AS category_cnt
+    FROM orders o
+    JOIN customers c ON c.customer_id = o.customer_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+      AND strftime('%Y', o.order_purchase_timestamp) = '2017'
+    GROUP BY c.customer_unique_id
+    HAVING COUNT(DISTINCT p.product_category) > 1
+) sub","SELECT COUNT(*) AS customers
+FROM (
+    SELECT c.customer_unique_id
+    FROM customers c
+    JOIN orders o ON o.customer_id = c.customer_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN products p ON p.product_id = oi.product_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY c.customer_unique_id
+    HAVING COUNT(DISTINCT p.product_category) > 1
+) t"
+h06,share_of_total,What share of total revenue comes from the top 10 sellers?,True,ok,1,False,5.04,,"WITH seller_revenue AS (
+    SELECT oi.seller_id,
+           ROUND(SUM(oi.price), 2) AS revenue
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.seller_id
+),
+total_rev AS (
+    SELECT ROUND(SUM(revenue), 2) AS total_revenue
+    FROM seller_revenue
+),
+top_sellers AS (
+    SELECT revenue
+    FROM seller_revenue
+    ORDER BY revenue DESC
+    LIMIT 10
+),
+top_rev AS (
+    SELECT ROUND(SUM(revenue), 2) AS top_revenue
+    FROM top_sellers
+)
+SELECT ROUND(100.0 * tr.top_revenue / tr.total_revenue, 2) AS pct_revenue_top_10,
+       tr.top_revenue,
+       tr.total_revenue
+FROM top_rev tr
+JOIN total_rev tr ON tr.total_revenue = tr.total_revenue","WITH s AS (
+    SELECT oi.seller_id, SUM(oi.price) AS revenue
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.seller_id
+)
+SELECT ROUND(100.0 * (SELECT SUM(revenue) FROM (SELECT revenue FROM s ORDER BY revenue DESC LIMIT 10))
+             / (SELECT SUM(revenue) FROM s), 1) AS top10_share_pct"
+h07,filter_on_aggregate,What is the average review score of orders that took more than 30 days to deliver?,True,ok,1,False,1.14,,"SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+FROM orders o
+JOIN reviews r ON r.order_id = o.order_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND (julianday(o.order_delivered_customer_date) - julianday(o.order_purchase_timestamp)) > 30","SELECT ROUND(AVG(r.review_score), 2) AS avg_review_score
+FROM reviews r
+JOIN orders o ON o.order_id = r.order_id
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND julianday(o.order_delivered_customer_date) - julianday(o.order_purchase_timestamp) > 30"
+h08,ranking,Which customer (customer_unique_id) generated the most revenue?,True,ok,1,False,9.78,,"SELECT c.customer_unique_id,
+       ROUND(SUM(oi.price), 2) AS total_revenue
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_unique_id
+ORDER BY total_revenue DESC
+LIMIT 1","SELECT c.customer_unique_id
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_unique_id
+ORDER BY SUM(oi.price) DESC
+LIMIT 1"
+h09,ranking,In which state do customers pay the highest average freight per item?,True,ok,1,False,7.48,,"SELECT c.customer_state,
+       ROUND(AVG(oi.freight_value), 2) AS avg_freight_per_item,
+       COUNT(*) AS item_count
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+HAVING COUNT(*) >= 30
+ORDER BY avg_freight_per_item DESC
+LIMIT 1","SELECT c.customer_state
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY c.customer_state
+ORDER BY AVG(oi.freight_value) DESC
+LIMIT 1"
+h10,multi_step,What percentage of orders were paid with more than one payment method?,True,ok,1,False,3.76,,"WITH valid_orders AS (
+    SELECT o.order_id
+    FROM orders o
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+),
+payment_counts AS (
+    SELECT p.order_id,
+           COUNT(DISTINCT p.payment_type) AS payment_method_cnt
+    FROM payments p
+    JOIN valid_orders vo ON vo.order_id = p.order_id
+    GROUP BY p.order_id
+)
+SELECT ROUND(100.0 * SUM(CASE WHEN payment_method_cnt > 1 THEN 1 ELSE 0 END)
+             / COUNT(*), 1) AS pct_multi_payment_orders
+FROM payment_counts","WITH pm AS (
+    SELECT p.order_id, COUNT(DISTINCT p.payment_type) AS methods
+    FROM payments p
+    JOIN orders o ON o.order_id = p.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY p.order_id
+)
+SELECT ROUND(100.0 * SUM(CASE WHEN methods > 1 THEN 1 ELSE 0 END) / COUNT(*), 1) AS pct_multi_method
+FROM pm"
+h11,date_logic,How many delivered orders arrived in the same calendar month they were purchased?,True,ok,1,False,1.09,,"SELECT COUNT(*) AS delivered_same_month_orders
+FROM orders o
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND strftime('%Y-%m', o.order_purchase_timestamp) = strftime('%Y-%m', o.order_delivered_customer_date)","SELECT COUNT(*) AS orders
+FROM orders o
+WHERE o.order_status = 'delivered'
+  AND o.order_delivered_customer_date IS NOT NULL
+  AND strftime('%Y-%m', o.order_delivered_customer_date) = strftime('%Y-%m', o.order_purchase_timestamp)"
+h12,dedup_trap,Which sellers have an average review score below 3 with at least 50 reviews?,False,ok,1,False,7.14,result differs from gold,"WITH seller_reviews AS (
+    SELECT s.seller_id,
+           r.review_score
+    FROM reviews r
+    JOIN orders o      ON o.order_id = r.order_id
+    JOIN order_items oi ON oi.order_id = o.order_id
+    JOIN sellers s     ON s.seller_id = oi.seller_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+)
+SELECT sr.seller_id,
+       ROUND(AVG(sr.review_score), 2) AS avg_review_score,
+       COUNT(*) AS review_count
+FROM seller_reviews sr
+GROUP BY sr.seller_id
+HAVING review_count >= 50
+   AND avg_review_score < 3
+ORDER BY avg_review_score ASC
+LIMIT 1000","WITH seller_orders AS (
+    SELECT DISTINCT oi.order_id, oi.seller_id
+    FROM order_items oi
+)
+SELECT so.seller_id
+FROM reviews r
+JOIN orders o ON o.order_id = r.order_id
+JOIN seller_orders so ON so.order_id = r.order_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+GROUP BY so.seller_id
+HAVING COUNT(*) >= 50 AND AVG(r.review_score) < 3"
+h13,statistics,What is the median order value?,True,ok,1,False,5.7,,"WITH order_totals AS (
+    SELECT o.order_id,
+           ROUND(SUM(oi.price), 2) AS order_value
+    FROM orders o
+    JOIN order_items oi ON oi.order_id = o.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY o.order_id
+),
+ordered_vals AS (
+    SELECT order_value,
+           ROW_NUMBER() OVER (ORDER BY order_value) AS rn,
+           COUNT(*) OVER () AS total_cnt
+    FROM order_totals
+)
+SELECT ROUND(
+           CASE
+               WHEN total_cnt % 2 = 1 THEN
+                   /* odd count: middle value */
+                   (SELECT order_value FROM ordered_vals WHERE rn = (total_cnt + 1) / 2)
+               ELSE
+                   /* even count: average of two middle values */
+                   ((SELECT order_value FROM ordered_vals WHERE rn = total_cnt / 2) +
+                    (SELECT order_value FROM ordered_vals WHERE rn = total_cnt / 2 + 1)) / 2.0
+           END, 2) AS median_order_value
+FROM ordered_vals
+LIMIT 1","WITH order_totals AS (
+    SELECT oi.order_id, SUM(oi.price) AS order_value
+    FROM order_items oi
+    JOIN orders o ON o.order_id = oi.order_id
+    WHERE o.order_status NOT IN ('canceled', 'unavailable')
+    GROUP BY oi.order_id
+),
+ranked AS (
+    SELECT order_value,
+           ROW_NUMBER() OVER (ORDER BY order_value) AS rn,
+           COUNT(*) OVER () AS n
+    FROM order_totals
+)
+SELECT ROUND(AVG(order_value), 2) AS median_order_value
+FROM ranked
+WHERE rn IN ((n + 1) / 2, (n + 2) / 2)"
+h14,typos,whats the totl revnue from sao paulo city in 2018,False,ok,1,False,1.08,result differs from gold,"SELECT ROUND(SUM(oi.price), 2) AS total_revenue
+FROM orders o
+JOIN order_items oi ON oi.order_id = o.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+  AND c.customer_city = 'São Paulo'
+  AND strftime('%Y', o.order_purchase_timestamp) = '2018'","SELECT ROUND(SUM(oi.price), 2) AS revenue
+FROM order_items oi
+JOIN orders o ON o.order_id = oi.order_id
+JOIN customers c ON c.customer_id = o.customer_id
+WHERE o.order_status NOT IN ('canceled', 'unavailable')
+  AND c.customer_city = 'sao paulo'
+  AND strftime('%Y', o.order_purchase_timestamp) = '2018'"
+h15,unanswerable,Which products are currently out of stock?,True,cannot_answer,0,False,0.65,,,CANNOT_ANSWER
